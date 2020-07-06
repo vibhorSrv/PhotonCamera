@@ -28,6 +28,7 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.ImageFormat;
 import android.graphics.Matrix;
+import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -50,6 +51,7 @@ import android.os.HandlerThread;
 import android.os.Message;
 import android.os.SystemClock;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.LayoutInflater;
@@ -69,6 +71,7 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.DialogFragment;
 import androidx.fragment.app.Fragment;
 import com.eszdman.photoncamera.AutoFitTextureView;
+import com.eszdman.photoncamera.Parameters.ExposureIndex;
 import com.eszdman.photoncamera.R;
 import com.eszdman.photoncamera.api.CameraReflectionApi;
 import com.eszdman.photoncamera.Parameters.FrameNumberSelector;
@@ -83,6 +86,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.RandomAccess;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -206,7 +210,7 @@ public class CameraFragment extends Fragment
     /**
      * A reference to the opened {@link CameraDevice}.
      */
-    private CameraDevice mCameraDevice;
+    public CameraDevice mCameraDevice;
 
     /**
      * The {@link android.util.Size} of camera preview.
@@ -255,10 +259,10 @@ public class CameraFragment extends Fragment
     /*An additional thread for running tasks that shouldn't block the UI.*/
     private HandlerThread mBackgroundThread;
     /*A {@link Handler} for running tasks in the background.*/
-    private Handler mBackgroundHandler;
+    public Handler mBackgroundHandler;
     /*An {@link ImageReader} that handles still image capture.*/
-    private ImageReader mImageReaderYuv;
-    private ImageReader mImageReaderRaw;
+    public ImageReader mImageReaderYuv;
+    public ImageReader mImageReaderRaw;
     /**
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
      * still image is ready to be saved.
@@ -291,8 +295,8 @@ public class CameraFragment extends Fragment
 
     };
     /*{@link CaptureRequest.Builder} for the camera preview*/
-    private CaptureRequest.Builder mPreviewRequestBuilder;
-    private CaptureRequest mPreviewRequest;
+    public CaptureRequest.Builder mPreviewRequestBuilder;
+    public CaptureRequest mPreviewRequest;
 
     /**
      * The current state of camera state for taking pictures.
@@ -319,14 +323,14 @@ public class CameraFragment extends Fragment
      * Whether the current camera device supports Flash or not.
      */
     private boolean mFlashSupported;
-    private boolean mFlashEnabled = false;
+    public boolean mFlashEnabled = false;
 
     /**
      * Orientation of the camera sensor
      */
     public int mSensorOrientation;
     int[] mCameraAfModes;
-
+    public boolean is30Fps = true;
     /**
      * A {@link CameraCaptureSession.CaptureCallback} that handles events related to JPEG capture.
      */
@@ -411,6 +415,32 @@ public class CameraFragment extends Fragment
             process(result);
         }
 
+        //Automatic 60fps preview
+        @Override
+        public void onCaptureStarted(@NonNull CameraCaptureSession session, @NonNull CaptureRequest request, long timestamp, long frameNumber) {
+            super.onCaptureStarted(session, request, timestamp, frameNumber);
+            if(frameNumber % 20 == 19){
+                if(ExposureIndex.index()+0.9 > 8.0){
+                    if(!is30Fps) {
+                        Log.d(TAG,"Changed preview target 30fps");
+                        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(3, 30));
+                        mPreviewRequest = mPreviewRequestBuilder.build();
+                        rebuildPreview();
+                        is30Fps = true;
+                    }
+                } else {
+                    if(is30Fps)
+                    {
+                        Log.d(TAG,"Changed preview target 60fps");
+                        mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(3, 60));
+                        mPreviewRequest = mPreviewRequestBuilder.build();
+                        rebuildPreview();
+                        is30Fps = false;
+                    }
+
+                }
+            }
+        }
     };
 
     /**
@@ -619,23 +649,17 @@ public class CameraFragment extends Fragment
         in.right *= k;
         in.top *= k;
     }
-
     private Size getCameraOutputSize(Size[] in) {
         Collections.sort(Arrays.asList(in), new CompareSizesByArea());
         List<Size> sizes = new ArrayList<>(Arrays.asList(in));
         int s = sizes.size() - 1;
-        if (sizes.get(s).getWidth() * sizes.get(s).getHeight() <= 40 * 1000000)
-            return sizes.get(s);
+        if (sizes.get(s).getWidth() * sizes.get(s).getHeight() <= 40 * 1000000) {
+            Size target = sizes.get(s);
+            return target;
+        }
         else {
             if(sizes.size()>1) {
                 Size target = sizes.get(s - 1);
-                Rect pre = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE);
-                Rect act = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
-                double k = (double) (target.getHeight()) / act.bottom;
-                mul(pre, k);
-                mul(act, k);
-                CameraReflectionApi.set(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE, act);
-                CameraReflectionApi.set(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE, pre);
                 return target;
             }
         }
@@ -646,11 +670,9 @@ public class CameraFragment extends Fragment
          Collections.sort(Arrays.asList(in), new CompareSizesByArea());
          List<Size> sizes = new ArrayList<>(Arrays.asList(in));
          int s = sizes.size() - 1;
-         if (sizes.get(s).getWidth() * sizes.get(s).getHeight() <= 40 * 1000000)
-             return sizes.get(s);
-         else {
-             if(sizes.size()> 1 ) {
-                 Size target = sizes.get(s - 1);
+         if (sizes.get(s).getWidth() * sizes.get(s).getHeight() <= 40 * 1000000 || Interface.i.settings.QuadBayer){
+             Size target = sizes.get(s);
+             if(Interface.i.settings.QuadBayer) {
                  Rect pre = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE);
                  Rect act = mCameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
                  double k = (double) (target.getHeight()) / act.bottom;
@@ -658,6 +680,12 @@ public class CameraFragment extends Fragment
                  mul(act, k);
                  CameraReflectionApi.set(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE, act);
                  CameraReflectionApi.set(CameraCharacteristics.SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE, pre);
+             }
+             return target;
+         }
+         else {
+             if(sizes.size()> 1 ) {
+                 Size target = sizes.get(s - 1);
                  return target;
              }
          }
@@ -972,7 +1000,6 @@ public class CameraFragment extends Fragment
 
             // This is the output Surface we need to start preview.
             Surface surface = new Surface(texture);
-
             // We set up a CaptureRequest.Builder with the output Surface.
             mPreviewRequestBuilder
                     = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -998,18 +1025,24 @@ public class CameraFragment extends Fragment
                                 //mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
                                 // Flash is automatically enabled when necessary.
                                 setAutoFlash(mPreviewRequestBuilder);
-                                //mPreviewRequestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY);
                                 Interface.i.settings.applyPrev(mPreviewRequestBuilder);
+
                                 //lightcycle.setVisibility(View.INVISIBLE);
                                 // Finally, we start displaying the camera preview.
+                                if(Interface.i.camera.is30Fps){
+                                    mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,new Range<>(24,30));
+                                } else {
+                                    mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,new Range<>(24,60));
+                                }
                                 mPreviewRequest = mPreviewRequestBuilder.build();
+
+                                //CameraReflectionApi.set(mPreviewRequest,CaptureRequest.CONTROL_AE_MODE,CaptureRequest.CONTROL_AE_MODE_OFF);
                                 mCaptureSession.setRepeatingRequest(mPreviewRequest,
                                         mCaptureCallback, mBackgroundHandler);
                             } catch (CameraAccessException e) {
                                 e.printStackTrace();
                             }
                         }
-
                         @Override
                         public void onConfigureFailed(
                                 @NonNull CameraCaptureSession cameraCaptureSession) {
@@ -1021,7 +1054,15 @@ public class CameraFragment extends Fragment
             e.printStackTrace();
         }
     }
-
+    public void rebuildPreview(){
+        try {
+            mCaptureSession.stopRepeating();
+            mCaptureSession.setRepeatingRequest(mPreviewRequest,
+                    mCaptureCallback, mBackgroundHandler);
+        } catch (CameraAccessException e) {
+            e.printStackTrace();
+        }
+    }
     /**
      * Configures the necessary {@link android.graphics.Matrix} transformation to `mTextureView`.
      * This method should be called after the camera preview size is determined in
@@ -1111,6 +1152,7 @@ public class CameraFragment extends Fragment
      * Capture a still picture. This method should be called when we get a response in
      * {@link #mCaptureCallback} from both {@link #lockFocus()}.
      */
+    private boolean FixPreview = false;
     private void captureStillPicture() {
         try {
             final Activity activity = getActivity();
@@ -1123,6 +1165,8 @@ public class CameraFragment extends Fragment
             // Use the same AE and AF modes as the preview.
             //mImageReader.setOnImageAvailableListener(mOnImageAvailableListener,mBackgroundHandler);
             //mImageReaderRes.setOnImageAvailableListener(mOnRawImageAvailableListener, mBackgroundHandler);
+            mCaptureSession.stopRepeating();
+            FixPreview = true;
             if(mTargetFormat != mPreviewTargetFormat) captureBuilder.addTarget(mImageReaderRaw.getSurface());
             else captureBuilder.addTarget(mImageReaderYuv.getSurface());
             Interface.i.settings.applyRes(captureBuilder);
@@ -1184,6 +1228,7 @@ public class CameraFragment extends Fragment
                     e.printStackTrace();
                     }
                     unlockFocus();
+                    FixPreview = false;
                     super.onCaptureSequenceCompleted(session, sequenceId, frameNumber);
                 }
 
@@ -1197,6 +1242,7 @@ public class CameraFragment extends Fragment
                             lightcycle.setProgress(0);
                             mTextureView.setAlpha(1f);
                             unlockFocus();
+                            FixPreview = false;
                         } catch (CameraAccessException e) {
                             e.printStackTrace();
                         }
@@ -1205,7 +1251,7 @@ public class CameraFragment extends Fragment
                     super.onCaptureProgressed(session, request, partialResult);
                 }
             };
-            mCaptureSession.stopRepeating();
+
             //mCaptureSession.setRepeatingBurst(captures, CaptureCallback, null);
             mCaptureSession.captureBurst(captures, CaptureCallback, null);
         } catch (CameraAccessException e) {
@@ -1234,10 +1280,9 @@ public class CameraFragment extends Fragment
     private void unlockFocus() {
         try {
             // Reset the auto-focus trigger
-            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_TRIGGER,
-                    CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
+            CameraReflectionApi.set(mPreviewRequest,CaptureRequest.CONTROL_AF_TRIGGER,CameraMetadata.CONTROL_AF_TRIGGER_CANCEL);
             setAutoFlash(mPreviewRequestBuilder);
-            mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+            mCaptureSession.capture(mPreviewRequest, mCaptureCallback,
                     mBackgroundHandler);
             // After this, the camera will go back to the normal state of preview.
             mState = STATE_PREVIEW;
@@ -1260,11 +1305,10 @@ public class CameraFragment extends Fragment
         return ids[n];
     }
 
-    private void setAutoFlash(CaptureRequest.Builder requestBuilder) {
+    public void setAutoFlash(CaptureRequest.Builder requestBuilder) {
         if (mFlashSupported) {
             if (mFlashEnabled)
-                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
-                        CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
+            CameraReflectionApi.set(mPreviewRequest,CaptureRequest.CONTROL_AE_MODE,CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH);
         }
     }
 

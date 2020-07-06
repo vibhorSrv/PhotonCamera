@@ -1,27 +1,22 @@
 package com.eszdman.photoncamera;
 
-import android.app.ActivityManager;
+
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.DngCreator;
-import android.hardware.camera2.params.BlackLevelPattern;
-import android.hardware.camera2.params.ColorSpaceTransform;
-import android.hardware.camera2.params.LensShadingMap;
-import android.hardware.camera2.params.RggbChannelVector;
 import android.media.Image;
 import android.util.Log;
-import android.util.Rational;
-import android.view.animation.ScaleAnimation;
-
 import androidx.exifinterface.media.ExifInterface;
 
-import com.eszdman.photoncamera.Render.Parameters;
+import com.eszdman.photoncamera.OpenGL.GLCoreBlockProcessing;
+import com.eszdman.photoncamera.OpenGL.GLFormat;
+import com.eszdman.photoncamera.OpenGL.Nodes.PostPipeline;
+import com.eszdman.photoncamera.OpenGL.Nodes.RawPipeline;
 import com.eszdman.photoncamera.Render.Pipeline;
 import com.eszdman.photoncamera.api.Camera2ApiAutoFix;
 import com.eszdman.photoncamera.api.ImageSaver;
 import com.eszdman.photoncamera.api.Interface;
-import com.eszdman.photoncamera.api.Settings;
 import com.eszdman.photoncamera.ui.CameraFragment;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
@@ -33,7 +28,6 @@ import org.opencv.core.MatOfInt;
 import org.opencv.core.MatOfKeyPoint;
 import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
-import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.features2d.DescriptorMatcher;
 import org.opencv.features2d.ORB;
@@ -42,22 +36,13 @@ import org.opencv.imgproc.Imgproc;
 import org.opencv.photo.AlignMTB;
 import org.opencv.photo.MergeMertens;
 import org.opencv.photo.Photo;
-import org.opencv.photo.TonemapDrago;
-
-import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import static android.hardware.camera2.CameraMetadata.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT_BGGR;
-import static android.hardware.camera2.CameraMetadata.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT_GBRG;
-import static android.hardware.camera2.CameraMetadata.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT_GRBG;
-import static android.hardware.camera2.CameraMetadata.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT_RGGB;
 import static androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL;
 import static org.opencv.calib3d.Calib3d.RANSAC;
 import static org.opencv.calib3d.Calib3d.findHomography;
-import static org.opencv.core.Core.gemm;
 
 public class ImageProcessing {
     static String TAG = "ImageProcessing";
@@ -289,17 +274,48 @@ public class ImageProcessing {
         int height = curimgs.get(0).getHeight();
         Log.d(TAG, "APPLYHDRX: buffer:" + curimgs.get(0).getPlanes()[0].getBuffer().asShortBuffer().remaining());
         Wrapper.init(width, height, curimgs.size());
+        Interface.i.parameters.FillParameters(res,CameraFragment.mCameraCharacteristics, new android.graphics.Point(width,height));
         Log.d(TAG, "Wrapper.init");
+        RawPipeline rawPipeline = new RawPipeline();
+        GLCoreBlockProcessing glproc = new GLCoreBlockProcessing(new android.graphics.Point(width,height), new GLFormat(GLFormat.DataType.UNSIGNED_16));
+        rawPipeline.glproc = glproc;
         Wrapper.loadFrame(curimgs.get(1).getPlanes()[0].getBuffer().asReadOnlyBuffer());
         Wrapper.loadFrame(curimgs.get(0).getPlanes()[0].getBuffer().asReadOnlyBuffer());
-        for (int i = 2; i < curimgs.size(); i++) Wrapper.loadFrame(curimgs.get(i).getPlanes()[0].getBuffer().asReadOnlyBuffer());
+        for (int i = 2; i < curimgs.size(); i++) {
+            ByteBuffer byteBuffer = curimgs.get(i).getPlanes()[0].getBuffer();
+            if(i%2 == 3 && false){
+                rawPipeline.sensivity = 0.5f;
+                rawPipeline.rawInput = byteBuffer;
+                ByteBuffer buff = rawPipeline.Run(Interface.i.parameters);
+                Log.d(TAG,"Buffer1 size:"+byteBuffer.remaining()+" Buffer2 size:"+buff.remaining());
+                byteBuffer.clear();
+                byteBuffer.put(buff);
+                //byteBuffer = buff;
+            }
+            if(i%4 == 2 && false){
+                rawPipeline.sensivity = 2.0f;
+                rawPipeline.rawInput = byteBuffer;
+                ByteBuffer buff = rawPipeline.Run(Interface.i.parameters);
+                Log.d(TAG,"Buffer1 size:"+byteBuffer.remaining()+" Buffer2 size:"+buff.remaining());
+                byteBuffer.clear();
+                byteBuffer.put(buff);
+            }
+            Wrapper.loadFrame(byteBuffer);
+        }
         Log.d(TAG, "Wrapper.loadFrame");
+        //ByteBuffer output = ByteBuffer.allocate(curimgs.get(0).getPlanes()[0].getBuffer().remaining());
+        //ByteBuffer output = ByteBuffer.allocate(curimgs.get(0).getPlanes()[0].getBuffer().remaining());
         ByteBuffer output = Wrapper.processFrame();
+        //ByteBuffer outb = output.duplicate();
+        curimgs.get(0).getPlanes()[0].getBuffer().clear();
+        curimgs.get(0).getPlanes()[0].getBuffer().put(output);
+        //curimgs.get(0).getPlanes()[0].getBuffer().clear();
+        //curimgs.get(0).getPlanes()[0].getBuffer().put(output);
         Log.d(TAG,"HDRX Alignment elapsed:"+(System.currentTimeMillis()-startTime) + " ms");
-        Interface.i.parameters.FillParameters(res,CameraFragment.mCameraCharacteristics, new android.graphics.Point(width,height));
+
         if(Interface.i.settings.rawSaver) {
-            curimgs.get(0).getPlanes()[0].getBuffer().clear();
-            curimgs.get(0).getPlanes()[0].getBuffer().put(output);
+            //curimgs.get(0).getPlanes()[0].getBuffer().clear();
+            //curimgs.get(0).getPlanes()[0].getBuffer().put(output);
             DngCreator dngCreator = new DngCreator(CameraFragment.mCameraCharacteristics, CameraFragment.mCaptureResult);
             try {
                 FileOutputStream outB = new FileOutputStream(ImageSaver.outimg);
@@ -330,8 +346,12 @@ public class ImageProcessing {
         }
         Log.d(TAG, "Wrapper.processFrame()");
         Interface.i.parameters.path = path;
-        for (int i = 0; i < curimgs.size(); i++) curimgs.get(i).close();
-         Pipeline.RunPipeline(output);
+        for (int i = 1; i < curimgs.size(); i++) curimgs.get(i).close();
+        curimgs.get(0).getPlanes()[0].getBuffer().position(0);
+        Pipeline.RunPipeline(curimgs.get(0).getPlanes()[0].getBuffer());
+        //PostPipeline pipeline = new PostPipeline();
+        //pipeline.Run(curimgs.get(0).getPlanes()[0].getBuffer(),Interface.i.parameters);
+        curimgs.get(0).close();
     }
     public void Run() {
         Image.Plane plane = curimgs.get(0).getPlanes()[0];

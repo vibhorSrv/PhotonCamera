@@ -2,9 +2,15 @@ package com.eszdman.photoncamera.api;
 
 import android.annotation.SuppressLint;
 import android.content.SharedPreferences;
+import android.graphics.Point;
+import android.graphics.Rect;
 import android.hardware.camera2.CaptureRequest;
+import android.hardware.camera2.CaptureResult;
+import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.params.TonemapCurve;
 import android.util.Log;
+import android.util.Range;
+import android.util.Size;
 
 import com.eszdman.photoncamera.ui.MainActivity;
 
@@ -12,7 +18,10 @@ import static android.content.Context.MODE_PRIVATE;
 import static android.hardware.camera2.CameraMetadata.COLOR_CORRECTION_MODE_HIGH_QUALITY;
 import static android.hardware.camera2.CameraMetadata.CONTROL_AE_MODE_ON;
 import static android.hardware.camera2.CameraMetadata.CONTROL_AE_STATE_LOCKED;
+import static android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_AUTO;
 import static android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+import static android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_CONTINUOUS_VIDEO;
+import static android.hardware.camera2.CameraMetadata.CONTROL_AF_MODE_OFF;
 import static android.hardware.camera2.CameraMetadata.EDGE_MODE_HIGH_QUALITY;
 import static android.hardware.camera2.CameraMetadata.HOT_PIXEL_MODE_HIGH_QUALITY;
 import static android.hardware.camera2.CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY;
@@ -23,7 +32,10 @@ import static android.hardware.camera2.CameraMetadata.TONEMAP_PRESET_CURVE_SRGB;
 import static android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE;
 import static android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE;
 import static android.hardware.camera2.CaptureRequest.CONTROL_AE_REGIONS;
+import static android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE;
 import static android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE;
+import static android.hardware.camera2.CaptureRequest.CONTROL_AF_REGIONS;
+import static android.hardware.camera2.CaptureRequest.CONTROL_ENABLE_ZSL;
 import static android.hardware.camera2.CaptureRequest.EDGE_MODE;
 import static android.hardware.camera2.CaptureRequest.HOT_PIXEL_MODE;
 import static android.hardware.camera2.CaptureRequest.JPEG_QUALITY;
@@ -37,6 +49,9 @@ public class Settings {
     private String TAG = "Settings";
     public int noiseReduction = NOISE_REDUCTION_MODE_OFF;
     public int afMode = CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+    public int aeModeOn = CONTROL_AE_MODE_ON;
+    public int aeModeLock = CONTROL_AE_STATE_LOCKED;
+    public int aeCurrentPrev = CONTROL_AE_MODE_ON;
     public int frameCount = 25;
     public int lumenCount = 3;
     public int chromaCount = 12;
@@ -54,6 +69,9 @@ public class Settings {
     public boolean rawSaver = false;
     public String lastPicture = null;
     public boolean ManualMode = false;
+    //TODO Add button for QuadResolution, if supported
+    public boolean QuadBayer = false;
+
     public int cfaPatern = 0;
     public boolean remosaic = false;
     public String mCameraID = "0";
@@ -168,24 +186,29 @@ public class Settings {
         count = 0;
     }
     public void applyRes(CaptureRequest.Builder captureBuilder) {
-        captureBuilder.set(JPEG_QUALITY, (byte) 100);
         captureBuilder.set(NOISE_REDUCTION_MODE, Interface.i.settings.noiseReduction);
         captureBuilder.set(HOT_PIXEL_MODE, HOT_PIXEL_MODE_HIGH_QUALITY);
         captureBuilder.set(COLOR_CORRECTION_MODE, COLOR_CORRECTION_MODE_HIGH_QUALITY);
-        captureBuilder.set(CONTROL_AE_MODE, CONTROL_AE_STATE_LOCKED);
+        captureBuilder.set(CONTROL_AE_MODE, aeModeLock);
+        captureBuilder.set(CONTROL_AF_MODE, Interface.i.settings.afMode);
         captureBuilder.set(STATISTICS_LENS_SHADING_MAP_MODE, STATISTICS_LENS_SHADING_MAP_MODE_ON);
         //captureBuilder.set(CONTROL_SCENE_MODE,CONTROL_SCENE_MODE_HDR);
         captureBuilder.set(EDGE_MODE, EDGE_MODE_HIGH_QUALITY);
-        captureBuilder.set(CONTROL_AF_MODE, Interface.i.settings.afMode);
     }
     @SuppressLint("InlinedApi")
     public void applyPrev(CaptureRequest.Builder captureBuilder) {
         Camera2ApiAutoFix.Apply();
-        //captureBuilder.set(CONTROL_ENABLE_ZSL,true);
-        captureBuilder.set(EDGE_MODE, EDGE_MODE_HIGH_QUALITY);
-        captureBuilder.set(COLOR_CORRECTION_MODE, COLOR_CORRECTION_MODE_HIGH_QUALITY);
+        captureBuilder.set(CONTROL_ENABLE_ZSL,false);
         captureBuilder.set(NOISE_REDUCTION_MODE, NOISE_REDUCTION_MODE_HIGH_QUALITY);
-        captureBuilder.set(CONTROL_AE_MODE, CONTROL_AE_MODE_ON);
+        captureBuilder.set(CONTROL_AE_MODE, aeModeOn);
+        Point size = new Point(Interface.i.camera.mImageReaderYuv.getWidth(),Interface.i.camera.mImageReaderYuv.getHeight());
+        double sizex = size.x;
+        double sizey = size.y;
+        //captureBuilder.set(CONTROL_AE_TARGET_FPS_RANGE,new Range<>(24,60));
+        MeteringRectangle rectm8[] = new MeteringRectangle[2];
+        rectm8[0] = new MeteringRectangle(new Rect((int)(sizex/3.0),(int)(sizey/3.0),(int)(sizex*2.0/3.0),(int)(sizey*2.0/3.0)),10);
+        rectm8[1] = new MeteringRectangle(new Point((int)(sizex/2.0),(int)(sizey/2.0)),new Size((int)(sizex/7),(int)(sizey/7)),30);
+        captureBuilder.set(CONTROL_AF_REGIONS,rectm8);
         captureBuilder.set(CONTROL_AF_MODE, Interface.i.settings.afMode);
         captureBuilder.set(TONEMAP_MODE,TONEMAP_MODE_GAMMA_VALUE);
         float rgb[] = new float[64];
