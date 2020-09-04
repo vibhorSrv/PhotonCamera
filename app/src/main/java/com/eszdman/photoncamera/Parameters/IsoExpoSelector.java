@@ -4,10 +4,9 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CaptureRequest;
 import android.util.Log;
 import android.util.Range;
-
+import com.eszdman.photoncamera.api.CameraFragment;
 import com.eszdman.photoncamera.api.Interface;
 import com.eszdman.photoncamera.api.Settings;
-import com.eszdman.photoncamera.api.CameraFragment;
 
 public class IsoExpoSelector {
     private static final String TAG = "IsoExpoSelector";
@@ -45,10 +44,16 @@ public class IsoExpoSelector {
         if(useTripod) {
             pair.MinIso();
         }
-        if(Interface.getSettings().ManualMode && Interface.getManual().exposure){
-            pair.exposure = (long)(ExposureIndex.sec*Interface.getManual().expvalue);
-            pair.iso = (int)(Interface.getManual().isovalue/getMPY());
-        }
+//        if (Interface.getSettings().ManualMode) {
+//            pair.exposure = (long)(ExposureIndex.sec*Interface.getManual().expvalue);
+//            pair.iso = (int)(Interface.getManual().isovalue/getMPY());
+        double currentManExp = Interface.getManualMode().getCurrentExposureValue();
+        double currentManISO = Interface.getManualMode().getCurrentISOValue();
+        pair.exposure = currentManExp != -1 ? (long) currentManExp : Interface.getCameraFragment().mPreviewExposuretime;
+        pair.iso = currentManISO != -1 ? (int) currentManISO : Interface.getCameraFragment().mPreviewIso;
+
+//            pair.iso = Interface.getCameraFragment().mPreviewIso;
+//        }
 //        if(Interface.i.settings.ManualMode && Interface.i.manual.exposure){
 //            pair.exposure = (long)(ExposureIndex.sec*Interface.i.manual.expvalue);
 //            pair.iso = (int)(Interface.i.manual.isovalue/getMPY());
