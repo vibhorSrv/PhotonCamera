@@ -4,9 +4,10 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CaptureRequest;
 import android.util.Log;
 import android.util.Range;
-import com.eszdman.photoncamera.api.CameraFragment;
+
 import com.eszdman.photoncamera.api.Interface;
 import com.eszdman.photoncamera.api.Settings;
+import com.eszdman.photoncamera.api.CameraFragment;
 
 public class IsoExpoSelector {
     private static final String TAG = "IsoExpoSelector";
@@ -51,8 +52,6 @@ public class IsoExpoSelector {
         double currentManISO = Interface.getManualMode().getCurrentISOValue();
         pair.exposure = currentManExp != -1 ? (long) currentManExp : Interface.getCameraFragment().mPreviewExposuretime;
         pair.iso = currentManISO != -1 ? (int) currentManISO : Interface.getCameraFragment().mPreviewIso;
-
-//            pair.iso = Interface.getCameraFragment().mPreviewIso;
 //        }
 //        if(Interface.i.settings.ManualMode && Interface.i.manual.exposure){
 //            pair.exposure = (long)(ExposureIndex.sec*Interface.i.manual.expvalue);

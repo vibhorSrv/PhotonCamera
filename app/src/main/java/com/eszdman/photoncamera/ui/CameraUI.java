@@ -6,7 +6,6 @@ import android.view.View;
 import android.widget.*;
 
 
-//import com.eszdman.photoncamera.Control.Manual;
 import com.eszdman.photoncamera.R;
 import com.eszdman.photoncamera.api.Camera2ApiAutoFix;
 import com.eszdman.photoncamera.api.CameraManager2;
